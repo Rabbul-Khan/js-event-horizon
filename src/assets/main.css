@@ -1,0 +1,14 @@
+/* src/assets/main.css */
+@import 'tailwindcss';
+
+/* Base dark theme for the whole app */
+@theme {
+  --color-bg-base: #0f172a; /* Tailwind slate-900 */
+}
+
+body {
+  background-color: var(--color-bg-base);
+  color: white;
+  margin: 0;
+  padding: 0;
+}
