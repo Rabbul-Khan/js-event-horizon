@@ -4,8 +4,8 @@ export type TaskType = 'sync' | 'setTimeout' | 'promise'
 
 export interface Instruction {
   id: string
-  type: TaskType
   label: string
+  type: TaskType
   sourceLine: number
   spawns?: Instruction[]
 }
