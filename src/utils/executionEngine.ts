@@ -114,6 +114,42 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
     }
     case 'DRAINING_MICROTASKS':
       // TODO: Empty the microtask queue one by one
+
+      if (newState.pendingAction === null) {
+        if (newState.microtaskQueue.length === 0) {
+          return { ...newState, phase: 'PROCESSING_MACROTASK' as const }
+        }
+        const currentMicrotask = newState.microtaskQueue[0]
+        return {
+          ...newState,
+          microtaskQueue: newState.microtaskQueue.slice(1),
+          pendingAction: 'PUSH',
+          currentTask: currentMicrotask ?? null,
+        }
+      }
+
+      if (newState.pendingAction === 'PUSH') {
+        if (!newState.currentTask) {
+          return newState
+        }
+        return {
+          ...newState,
+          callStack: [...newState.callStack, newState.currentTask],
+          pendingAction: 'EXECUTE_AND_POP',
+          activeLine: newState.currentTask.sourceLine,
+        }
+      }
+
+      if (newState.pendingAction === 'EXECUTE_AND_POP') {
+        return {
+          ...newState,
+          callStack: newState.callStack.slice(0, -1),
+          pendingAction: null,
+          currentTask: null,
+          activeLine: null,
+        }
+      }
+
       break
 
     case 'PROCESSING_MACROTASK':
