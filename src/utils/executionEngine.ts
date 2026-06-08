@@ -32,13 +32,13 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
     case 'EXECUTING_SYNC': {
       // TODO: Handle the 3 pending actions:
       // 1. pendingAction === null (Need to grab next instruction and queue a PUSH)
-      if (state.pendingAction === null) {
-        const instruction = scenario.instructions[state.currentInstructionIndex]
+      if (newState.pendingAction === null) {
+        const instruction = scenario.instructions[newState.currentInstructionIndex]
         if (!instruction) {
-          return { ...state, phase: 'DRAINING_MICROTASKS' as const }
+          return { ...newState, phase: 'DRAINING_MICROTASKS' as const }
         }
         return {
-          ...state,
+          ...newState,
           currentTask: {
             id: instruction.id,
             label: instruction.label,
@@ -46,25 +46,25 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
             sourceLine: instruction.sourceLine,
           },
           pendingAction: 'PUSH',
-          currentInstructionIndex: state.currentInstructionIndex + 1,
+          currentInstructionIndex: newState.currentInstructionIndex + 1,
         }
       }
       // 2. pendingAction === 'PUSH' (Need to move task to Call Stack)
-      if (state.pendingAction === 'PUSH') {
-        if (state.currentTask === null) {
-          return state
+      if (newState.pendingAction === 'PUSH') {
+        if (newState.currentTask === null) {
+          return newState
         }
         return {
-          ...state,
+          ...newState,
           pendingAction: 'EXECUTE_AND_POP',
-          callStack: [...state.callStack, state.currentTask],
-          activeLine: state.currentTask.sourceLine,
+          callStack: [...newState.callStack, newState.currentTask],
+          activeLine: newState.currentTask.sourceLine,
         }
       }
       // 3. pendingAction === 'EXECUTE_AND_POP' (Need to pop off stack and route spawns)
-      if (state.pendingAction === 'EXECUTE_AND_POP') {
-        if (!state.currentTask) return state
-        const match = state.currentTask.label.match(/"(.*?)"/)
+      if (newState.pendingAction === 'EXECUTE_AND_POP') {
+        if (!newState.currentTask) return newState
+        const match = newState.currentTask.label.match(/"(.*?)"/)
         let consoleLog
         if (match) {
           consoleLog = String(match[1])
@@ -73,7 +73,7 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
         const pushToQueue = (taskType: 'setTimeout' | 'promise') => {
           const taskToPush = scenario.instructions.find(
             (instruction) =>
-              instruction.id === state.currentTask?.id && instruction.type === taskType,
+              instruction.id === newState.currentTask?.id && instruction.type === taskType,
           )
 
           const spawnTasks = taskToPush?.spawns?.map((spawn) => {
@@ -86,25 +86,27 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
           })
 
           if (taskType === 'setTimeout') {
-            newState = { ...state, webApis: [...state.webApis, ...(spawnTasks ?? [])] }
+            newState = { ...newState, webApis: [...newState.webApis, ...(spawnTasks ?? [])] }
           } else if (taskType === 'promise') {
             newState = {
-              ...state,
-              microtaskQueue: [...state.microtaskQueue, ...(spawnTasks ?? [])],
+              ...newState,
+              microtaskQueue: [...newState.microtaskQueue, ...(spawnTasks ?? [])],
             }
           }
         }
 
-        if (state.currentTask.type === 'setTimeout') {
+        if (newState.currentTask.type === 'setTimeout') {
           pushToQueue('setTimeout')
-        } else if (state.currentTask.type === 'promise') {
+        } else if (newState.currentTask.type === 'promise') {
           pushToQueue('promise')
         }
 
         return {
           ...newState,
-          callStack: state.callStack.slice(0, -1),
-          consoleOutput: consoleLog ? [...state.consoleOutput, consoleLog] : state.consoleOutput,
+          callStack: newState.callStack.slice(0, -1),
+          consoleOutput: consoleLog
+            ? [...newState.consoleOutput, consoleLog]
+            : newState.consoleOutput,
           pendingAction: null,
           currentTask: null,
           activeLine: null,
@@ -114,7 +116,8 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
     }
     case 'DRAINING_MICROTASKS':
       // TODO: Empty the microtask queue one by one
-
+      // TODO: Handle the 3 pending actions:
+      // 1. pendingAction === null (Need to grab micro task from micro task queue)
       if (newState.pendingAction === null) {
         if (newState.microtaskQueue.length === 0) {
           return { ...newState, phase: 'PROCESSING_MACROTASK' as const }
@@ -128,6 +131,7 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
         }
       }
 
+      // 2. pendingAction === PUSH (Need to move micro task to call stack)
       if (newState.pendingAction === 'PUSH') {
         if (!newState.currentTask) {
           return newState
@@ -140,10 +144,50 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
         }
       }
 
+      // 3. pendingAction === 'EXECUTE_AND_POP' (Need to pop off stack and route spawns)
       if (newState.pendingAction === 'EXECUTE_AND_POP') {
+        if (!newState.currentTask) {
+          return state
+        }
+        let consoleLog
+        let taskToPush
+        let spawns
+
+        const match = newState.currentTask.label.match(/"(.*?)"/)
+        if (match) {
+          consoleLog = String(match[1])
+        }
+
+        if (newState.currentTask.type === 'promise' || newState.currentTask.type === 'setTimeout') {
+          taskToPush = scenario.instructions.find((instruction) => {
+            return instruction.id === newState.currentTask?.id
+          })
+          if (taskToPush) {
+            spawns = taskToPush.spawns?.map((task) => {
+              return {
+                id: task.id,
+                type: task.type,
+                label: task.label,
+                sourceLine: task.sourceLine,
+              }
+            })
+          }
+        }
+
         return {
           ...newState,
+          webApis:
+            spawns && newState.currentTask.type === 'setTimeout'
+              ? [...newState.webApis, ...spawns]
+              : newState.webApis,
+          microtaskQueue:
+            spawns && newState.currentTask.type === 'promise'
+              ? [...newState.microtaskQueue, ...spawns]
+              : newState.microtaskQueue,
           callStack: newState.callStack.slice(0, -1),
+          consoleOutput: consoleLog
+            ? [...newState.consoleOutput, consoleLog]
+            : newState.consoleOutput,
           pendingAction: null,
           currentTask: null,
           activeLine: null,
@@ -154,8 +198,9 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
 
     case 'PROCESSING_MACROTASK':
       // TODO: Process exactly ONE macrotask, then go back to microtasks
+
       break
   }
 
-  return state
+  return newState
 }
