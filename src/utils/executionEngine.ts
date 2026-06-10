@@ -198,7 +198,98 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
 
     case 'PROCESSING_MACROTASK':
       // TODO: Process exactly ONE macrotask, then go back to microtasks
+      if (newState.pendingAction === null) {
+        if (newState.macrotaskQueue.length > 0) {
+          if (!newState.webApis[0]) {
+            return newState
+          }
+          return {
+            ...newState,
+            pendingAction: 'PUSH',
+            macrotaskQueue: [...newState.macrotaskQueue, newState.webApis[0]],
+          }
+        } else if (newState.macrotaskQueue.length === 0 && newState.webApis.length > 0) {
+          return {
+            ...newState,
+            pendingAction: 'WEB_API_COMPLETE',
+          }
+        }
+      }
+      if (newState.pendingAction === 'WEB_API_COMPLETE') {
+        if (!newState.webApis[0]) {
+          return newState
+        }
+        return {
+          ...newState,
+          macrotaskQueue: [...newState.macrotaskQueue, newState.webApis[0]],
+          webApis: newState.webApis.slice(1),
+          currentTask: newState.macrotaskQueue[0] ?? newState.currentTask,
+          pendingAction: 'PUSH',
+        }
+      }
+      if (newState.pendingAction === 'PUSH') {
+        if (!newState.currentTask) {
+          return newState
+        }
+        return {
+          ...newState,
+          callStack: [...newState.callStack, newState.currentTask],
+          pendingAction: 'EXECUTE_AND_POP',
+          activeLine: newState?.currentTask?.sourceLine,
+          macrotaskQueue: newState.macrotaskQueue.slice(1),
+        }
+      }
+      if (newState.pendingAction === 'EXECUTE_AND_POP') {
+        if (!newState.currentTask) return newState
+        const match = newState.currentTask.label.match(/"(.*?)"/)
+        let consoleLog
+        if (match) {
+          consoleLog = String(match[1])
+        }
 
+        const pushToQueue = (taskType: 'setTimeout' | 'promise') => {
+          const taskToPush = scenario.instructions.find(
+            (instruction) =>
+              instruction.id === newState.currentTask?.id && instruction.type === taskType,
+          )
+
+          const spawnTasks = taskToPush?.spawns?.map((spawn) => {
+            return {
+              id: spawn.id,
+              label: spawn.label,
+              type: spawn.type,
+              sourceLine: spawn.sourceLine,
+            }
+          })
+
+          if (taskType === 'setTimeout') {
+            newState = { ...newState, webApis: [...newState.webApis, ...(spawnTasks ?? [])] }
+          } else if (taskType === 'promise') {
+            newState = {
+              ...newState,
+              microtaskQueue: [...newState.microtaskQueue, ...(spawnTasks ?? [])],
+            }
+          }
+        }
+
+        if (newState.currentTask.type === 'setTimeout') {
+          pushToQueue('setTimeout')
+        } else if (newState.currentTask.type === 'promise') {
+          pushToQueue('promise')
+        }
+
+        return {
+          ...newState,
+          phase: 'DRAINING_MICROTASKS',
+          callStack: newState.callStack.slice(0, -1),
+          consoleOutput: consoleLog
+            ? [...newState.consoleOutput, consoleLog]
+            : newState.consoleOutput,
+          pendingAction: null,
+          currentTask: null,
+          activeLine: null,
+        }
+      }
       break
   }
 
