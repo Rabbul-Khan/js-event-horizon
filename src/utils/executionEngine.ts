@@ -28,6 +28,16 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
     ...state,
   }
 
+  if (newState.webApis.length > 0) {
+    if (newState.webApis[0]) {
+      newState = {
+        ...newState,
+        macrotaskQueue: [...newState.macrotaskQueue, newState.webApis[0]],
+        webApis: newState.webApis.slice(1),
+      }
+    }
+  }
+
   switch (newState.phase) {
     case 'EXECUTING_SYNC': {
       // TODO: Handle the 3 pending actions:
@@ -200,31 +210,21 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
       // TODO: Process exactly ONE macrotask, then go back to microtasks
       if (newState.pendingAction === null) {
         if (newState.macrotaskQueue.length > 0) {
-          if (!newState.webApis[0]) {
+          if (!newState.macrotaskQueue[0]) {
             return newState
           }
           return {
             ...newState,
+            currentTask: newState.macrotaskQueue[0],
             pendingAction: 'PUSH',
-            macrotaskQueue: [...newState.macrotaskQueue, newState.webApis[0]],
+            macrotaskQueue: newState.macrotaskQueue.slice(1),
           }
-        } else if (newState.macrotaskQueue.length === 0 && newState.webApis.length > 0) {
+        } else if (newState.macrotaskQueue.length === 0) {
           return {
             ...newState,
-            pendingAction: 'WEB_API_COMPLETE',
+            pendingAction: null,
+            phase: 'IDLE',
           }
-        }
-      }
-      if (newState.pendingAction === 'WEB_API_COMPLETE') {
-        if (!newState.webApis[0]) {
-          return newState
-        }
-        return {
-          ...newState,
-          macrotaskQueue: [...newState.macrotaskQueue, newState.webApis[0]],
-          webApis: newState.webApis.slice(1),
-          currentTask: newState.macrotaskQueue[0] ?? newState.currentTask,
-          pendingAction: 'PUSH',
         }
       }
       if (newState.pendingAction === 'PUSH') {
@@ -236,9 +236,9 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
           callStack: [...newState.callStack, newState.currentTask],
           pendingAction: 'EXECUTE_AND_POP',
           activeLine: newState?.currentTask?.sourceLine,
-          macrotaskQueue: newState.macrotaskQueue.slice(1),
         }
       }
+
       if (newState.pendingAction === 'EXECUTE_AND_POP') {
         if (!newState.currentTask) return newState
         const match = newState.currentTask.label.match(/"(.*?)"/)
