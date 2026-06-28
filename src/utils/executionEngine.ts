@@ -57,6 +57,15 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
           },
           pendingAction: 'PUSH',
           currentInstructionIndex: newState.currentInstructionIndex + 1,
+          executionLog: [
+            ...newState.executionLog,
+            {
+              tick: newState.executionLog.length + 1,
+              taskType: instruction.type,
+              message: 'Fetched instruction from main script. Preparing to push to Call Stack.',
+              codeSnippet: instruction.label,
+            },
+          ],
         }
       }
       // 2. pendingAction === 'PUSH' (Need to move task to Call Stack)
@@ -69,6 +78,15 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
           pendingAction: 'EXECUTE_AND_POP',
           callStack: [...newState.callStack, newState.currentTask],
           activeLine: newState.currentTask.sourceLine,
+          executionLog: [
+            ...newState.executionLog,
+            {
+              tick: newState.executionLog.length + 1,
+              taskType: newState.currentTask.type,
+              message: 'Task pushed to call stack',
+              codeSnippet: newState.currentTask.label,
+            },
+          ],
         }
       }
       // 3. pendingAction === 'EXECUTE_AND_POP' (Need to pop off stack and route spawns)
@@ -120,6 +138,20 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
           pendingAction: null,
           currentTask: null,
           activeLine: null,
+          executionLog: [
+            ...newState.executionLog,
+            {
+              tick: newState.executionLog.length + 1,
+              taskType: newState.currentTask.type,
+              message:
+                newState.currentTask.type === 'sync'
+                  ? 'Console log outputted'
+                  : newState.currentTask.type === 'setTimeout'
+                    ? 'Set timeout starts execution. Callback passed to web api queue'
+                    : 'Promise starts execution. Callback passed to microtask queue',
+              codeSnippet: newState.currentTask.label,
+            },
+          ],
         }
       }
       break
@@ -138,6 +170,17 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
           microtaskQueue: newState.microtaskQueue.slice(1),
           pendingAction: 'PUSH',
           currentTask: currentMicrotask ?? null,
+          executionLog: currentMicrotask
+            ? [
+                ...newState.executionLog,
+                {
+                  tick: newState.executionLog.length + 1,
+                  taskType: currentMicrotask.type,
+                  message: 'Preparing to push task from microtask queue to call stack',
+                  codeSnippet: currentMicrotask.label,
+                },
+              ]
+            : newState.executionLog,
         }
       }
 
@@ -151,6 +194,17 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
           callStack: [...newState.callStack, newState.currentTask],
           pendingAction: 'EXECUTE_AND_POP',
           activeLine: newState.currentTask.sourceLine,
+          executionLog: newState.currentTask
+            ? [
+                ...newState.executionLog,
+                {
+                  tick: newState.executionLog.length + 1,
+                  taskType: newState.currentTask.type,
+                  message: 'Pushed microtask to ',
+                  codeSnippet: newState.currentTask.label,
+                },
+              ]
+            : newState.executionLog,
         }
       }
 
@@ -224,6 +278,7 @@ export const stepForward = (state: EventLoopState, scenario: Scenario): EventLoo
             ...newState,
             pendingAction: null,
             phase: 'IDLE',
+            isComplete: true,
           }
         }
       }
